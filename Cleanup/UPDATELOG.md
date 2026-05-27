@@ -1,5 +1,8 @@
 # updatelog
 
+## further task
+- Add more application cache.
+
 ## v1.02
 - Added post-cleanup summary screen showing total freed space and deleted item count
 - Added option to return to main menu or exit after cleanup completes
