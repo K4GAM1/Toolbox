@@ -1,7 +1,15 @@
 # About this repository
 
-A series of system optimization and cleanup python scripts. To free you  from the tedious task of cleaning up your computer.Most of them were done by Claude code. (Of course I specified the exact method. )
+A series of system optimization scripts. Includes Windows11.
 
-I plan to add more and integrate them into a toolbox.
+# What can these scripts do
 
-Anyway, hope it's helpful to you.
+# Directory
+
+```
+
+```
+
+# Future Plan
+
+I plan write more automation scripts and add support for linux(main for arch) and MacOS. 
