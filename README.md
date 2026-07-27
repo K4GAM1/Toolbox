@@ -6,9 +6,6 @@ A series of system optimization scripts. Includes Windows11.
 
 # Directory
 
-```
-
-```
 
 # Future Plan
 
