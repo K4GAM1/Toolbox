@@ -4,6 +4,8 @@ A series of system optimization scripts. Includes Windows11.
 
 # What can these scripts do
 
+General optimize script. Includes cleanup, menu manage and other tools.
+
 # Directory
 
 
