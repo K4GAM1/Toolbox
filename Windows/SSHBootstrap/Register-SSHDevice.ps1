@@ -26,8 +26,11 @@
   IP address or hostname of the target device.
 
 .PARAMETER TargetUser
-  Username to log into the target with. You will be prompted for its password once
-  (ssh's own prompt) unless key auth already works.
+  Username to log into the target with. You will be prompted for its password
+  (ssh's own prompt) unless key auth already works -- once for a unix target,
+  twice for a windows-admin/windows-user target (scp + ssh are separate
+  connections; tried collapsing this via ControlMaster but Windows' bundled
+  OpenSSH client doesn't support it reliably, see Invoke-RemotePowerShellFile).
 
 .PARAMETER TargetOS
   'windows-admin', 'windows-user', or 'unix'.
@@ -89,6 +92,12 @@ function Invoke-RemotePowerShellFile {
         [string]$TargetUser,
         [string]$TargetHost
     )
+    # NOTE: scp + ssh below are two separate connections, so on a windows-*
+    # target the target's password gets asked twice (once per connection) --
+    # tried collapsing this into one prompt via ssh ControlMaster/ControlPath,
+    # but Windows' bundled OpenSSH client fails on it ("getsockname failed:
+    # Not a socket" -- a known Win32-OpenSSH limitation with AF_UNIX control
+    # sockets). Not fixable from here; left as two prompts.
     $localTemp = New-TemporaryFile
     $remoteName = "ssh-bootstrap-$([guid]::NewGuid().ToString('N').Substring(0,8)).ps1"
     try {
