@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """
-Windows 用户目录垃圾清理工具
-清理 C:\\Users\\<USERNAME> 下的缓存、安装包和空文件夹
+Windows 垃圾清理工具
+清理 C:\\Users\\<USERNAME> 下的缓存、安装包、日志与空文件夹，
+以及 Windows Temp / Windows Update 下载缓存 / 回收站等系统级垃圾
 """
+
+# 延迟求值类型注解：让 `X | None` 等 3.10+ 联合类型语法在 3.9 上也能正常导入运行
+# （曾在只有 Python 3.9 的机器上实测直接 TypeError 崩溃，见 UPDATELOG v1.03）
+from __future__ import annotations
 
 import os
 import sys
@@ -46,7 +51,7 @@ BOLD    = "\033[1m"
 RESET   = "\033[0m"
 
 _RAINBOW  = [RED, YELLOW, GREEN, CYAN, MAGENTA, BLUE]
-_VERSION  = "1.02"
+_VERSION  = "1.03"
 
 
 def _rainbow_words(text: str) -> str:
@@ -92,7 +97,8 @@ _UI: dict[str, dict[str, str]] = {
         "lang_invalid":   "无效选项，请重新输入",
         "cat_gpu_cache":  "GPU着色器缓存",
         "cat_logs":       "日志与崩溃转储",
-        "welcome_desc":   "清理 Windows 用户目录下的缓存、日志、GPU 着色器缓存与空文件夹",
+        "cat_system":     "系统级缓存",
+        "welcome_desc":   "清理 Windows 用户目录及系统级下的缓存、日志、GPU 着色器缓存与空文件夹",
         "welcome_lang":   "切换语言",
         "welcome_scan":   "开始扫描",
         "welcome_quit":   "退出",
@@ -136,7 +142,8 @@ _UI: dict[str, dict[str, str]] = {
         "lang_invalid":   "Invalid option, please try again",
         "cat_gpu_cache":  "GPU Shader Cache",
         "cat_logs":       "Logs & Crash Dumps",
-        "welcome_desc":   "Cleans cache, logs, GPU shader cache & empty folders in AppData",
+        "cat_system":     "System-level Cache",
+        "welcome_desc":   "Cleans cache, logs, GPU shader cache, empty folders & system-level junk",
         "welcome_lang":   "Change Language",
         "welcome_scan":   "Start Scan",
         "welcome_quit":   "Quit",
@@ -180,7 +187,8 @@ _UI: dict[str, dict[str, str]] = {
         "lang_invalid":   "無効な選択です。再入力してください",
         "cat_gpu_cache":  "GPUシェーダーキャッシュ",
         "cat_logs":       "ログ・クラッシュダンプ",
-        "welcome_desc":   "AppData 内のキャッシュ・ログ・GPUシェーダー・空フォルダを削除",
+        "cat_system":     "システムレベルキャッシュ",
+        "welcome_desc":   "AppData 内のキャッシュ・ログ・GPUシェーダー・空フォルダ・システムレベルの不要ファイルを削除",
         "welcome_lang":   "言語変更",
         "welcome_scan":   "スキャン開始",
         "welcome_quit":   "終了",
@@ -650,7 +658,13 @@ def clean_cache(user: Path, dry: bool, verbose: bool,
         ("npm Cache",               delete_dir_contents,  loc / "npm-cache"),
         ("Yarn Cache",              delete_dir_contents,  loc / "Yarn/Cache"),
         ("VS Code CachedData",      delete_dir_contents,  roam / "Code/CachedData"),
+        ("VS Code Cache",           delete_dir_contents,  roam / "Code/Cache"),
+        ("VS Code GPUCache",        delete_dir_contents,  roam / "Code/GPUCache"),
         ("Cursor CachedData",       delete_dir_contents,  roam / "Cursor/CachedData"),
+        ("Cursor Cache",            delete_dir_contents,  roam / "Cursor/Cache"),
+        ("Cursor GPUCache",         delete_dir_contents,  roam / "Cursor/GPUCache"),
+        ("Discord GPUCache",        delete_dir_contents,  roam / "discord/GPUCache"),
+        ("Calibre 缓存",             delete_dir_contents,  loc / "calibre-cache"),
         # ── 游戏平台 ──────────────────────────────────────────────
         ("Steam htmlcache",         delete_dir_contents,  loc / "Steam/htmlcache"),
         ("Battle.net htmlcache",    delete_glob_contents, loc / "Battle.net", "*/Cache"),
@@ -659,6 +673,12 @@ def clean_cache(user: Path, dry: bool, verbose: bool,
         ("Quark Cache",             delete_glob_contents, loc / "Quark/User Data", "*/Cache"),
         ("Quark Code Cache",        delete_glob_contents, loc / "Quark/User Data", "*/Code Cache"),
         ("Zoom WebCache",           delete_dir_contents,  roam / "Zoom/data/WebviewCacheX64"),
+        ("QQ 临时系统缓存",          delete_dir_contents,  roam / "Tencent/QQTempSys"),
+        # ── Electron/Squirrel 自动更新暂存目录 ─────────────────────
+        # 命名规律 "<应用>-updater"（如 vortex-updater / qq-chat-updater /
+        # adrive-desktop-updater），是各 Electron 应用自带的更新器下载暂存区，
+        # 内容为待安装的更新包，清空后应用会在下次检查更新时重新下载，安全。
+        ("*-updater 暂存目录",       delete_glob_contents, loc, "*-updater"),
         # ── Windows 错误报告 ──────────────────────────────────────
         ("WER ReportArchive",       delete_dir_contents,  loc / "Microsoft/Windows/WER/ReportArchive"),
         ("WER ReportQueue",         delete_dir_contents,  loc / "Microsoft/Windows/WER/ReportQueue"),
@@ -769,6 +789,7 @@ def clean_logs(user: Path, dry: bool, verbose: bool,
     # ── 崩溃转储 ─────────────────────────────────────────────────
     dump_dirs = [
         loc / "CrashDumps",
+        loc / "CrashFiles",                               # 部分 Unreal Engine 游戏崩溃报告
         loc / "Microsoft/Windows/WER/Temp",
         loc / "Temp",
         loc / "Activision",                              # CoD crash_reports
@@ -797,6 +818,19 @@ def clean_logs(user: Path, dry: bool, verbose: bool,
                             freed += fv
                             deleted += 1
                 r.merge(freed, deleted, skipped)
+
+    # ── 整目录清空的日志文件夹（文件夹本身即为日志专用，可放心清空全部内容）──
+    full_log_dirs = [
+        roam / "Tencent/Logs",
+    ]
+    for d in full_log_dirs:
+        label = f"日志目录 {d.name}"
+        if not verbose and progress_cb:
+            progress_cb(label, r.freed)
+        if verbose:
+            print(f"  {CYAN}→ {label}{RESET}")
+        f, dl, sk = delete_dir_contents(d, dry, verbose)
+        r.merge(f, dl, sk)
 
     # ── 应用日志文件 ──────────────────────────────────────────────
     log_tasks: list[tuple[str, Path, str]] = [
@@ -915,6 +949,65 @@ def clean_empty_dirs(user: Path, dry: bool, verbose: bool,
     return r
 
 
+def _empty_recycle_bin(dry: bool, verbose: bool) -> tuple[int, int, int]:
+    """清空回收站（走 Win32 SHEmptyRecycleBinW API，而不是直接删 $Recycle.Bin 里
+    的文件——后者会绕过系统对每用户 SID 子目录的元数据管理，可能留下损坏项。
+    非管理员运行时通常只能看到/清空当前用户自己的回收站条目，其余会被系统跳过。"""
+    bin_path = Path(f"{os.environ.get('SystemDrive', 'C:')}\\$Recycle.Bin")
+    size = path_size(bin_path)
+    if dry:
+        if verbose and size:
+            print(f"    {YELLOW}[DRY]{RESET} 回收站  ({fmt_size(size)})")
+        return size, 0, 0
+    try:
+        import ctypes
+        SHERB_NOCONFIRMATION = 0x00000001
+        SHERB_NOPROGRESSUI   = 0x00000002
+        SHERB_NOSOUND        = 0x00000004
+        ctypes.windll.shell32.SHEmptyRecycleBinW(
+            None, None, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND
+        )
+        if verbose and size:
+            print(f"    {RED}[DEL]{RESET} 回收站  ({fmt_size(size)})")
+        return size, (1 if size else 0), 0
+    except Exception as e:
+        if verbose:
+            print(f"    {YELLOW}[ERR]{RESET}  回收站  ({e})")
+        return 0, 0, 1
+
+
+def clean_system(user: Path, dry: bool, verbose: bool,
+                 progress_cb: Callable[[str, int], None] | None = None) -> Result:
+    """清理系统级（非用户目录）垃圾：Windows Temp、Windows Update 更新包缓存、回收站。
+    这些位置通常需要管理员权限才能完全清空，非管理员运行时会有部分项目因权限不足被跳过。"""
+    r = Result("系统级缓存", key="cat_system")
+    sys_drive = Path(f"{os.environ.get('SystemDrive', 'C:')}\\")
+    windir = Path(os.environ.get("SystemRoot", str(sys_drive / "Windows")))
+
+    tasks = [
+        ("Windows Temp（系统）",     delete_dir_contents, windir / "Temp"),
+        ("Windows Update 下载缓存", delete_dir_contents, windir / "SoftwareDistribution" / "Download"),
+    ]
+
+    for label, fn, *args in tasks:
+        if not verbose and progress_cb:
+            progress_cb(label, r.freed)
+        if verbose:
+            print(f"  {CYAN}→ {label}{RESET}")
+        f, d, sk = fn(*args, dry, verbose)
+        r.merge(f, d, sk)
+
+    label = "回收站"
+    if not verbose and progress_cb:
+        progress_cb(label, r.freed)
+    if verbose:
+        print(f"  {CYAN}→ {label}{RESET}")
+    f, d, sk = _empty_recycle_bin(dry, verbose)
+    r.merge(f, d, sk)
+
+    return r
+
+
 # ---------- 清理结果菜单 ----------
 
 def show_post_menu(total_freed: int, total_deleted: int, total_skipped: int) -> str:
@@ -972,7 +1065,7 @@ def show_post_menu(total_freed: int, total_deleted: int, total_skipped: int) -> 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="cleaner",
-        description="Windows 用户目录垃圾清理工具",
+        description="Windows 垃圾清理工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -982,6 +1075,7 @@ def parse_args() -> argparse.Namespace:
   python cleaner.py --gpu-cache -x   # 只清理 GPU 着色器缓存并执行
   python cleaner.py --logs -x        # 只清理日志与崩溃转储并执行
   python cleaner.py --empty-dirs -x  # 只删除空文件夹并执行
+  python cleaner.py --system -x      # 只清理系统级缓存（Windows Temp/Update/回收站）并执行，建议以管理员身份运行
   python cleaner.py -x -v            # 执行并显示每个被删文件
         """,
     )
@@ -990,6 +1084,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--gpu-cache",    action="store_true", help="清理 GPU 着色器缓存（NVIDIA DXCache / D3DSCache）")
     p.add_argument("--logs",         action="store_true", help="清理日志文件与崩溃转储（*.log / *.dmp）")
     p.add_argument("--empty-dirs",   action="store_true", help="删除空文件夹")
+    p.add_argument("--system",       action="store_true", help="清理系统级缓存（Windows Temp / Update 下载缓存 / 回收站，建议管理员权限运行）")
     p.add_argument("--user",         metavar="PATH",      help="指定用户目录（默认当前用户）")
     p.add_argument("-x", "--execute",action="store_true", help="实际执行删除（默认为预览模式）")
     p.add_argument("-v", "--verbose", action="store_true", help="显示每个被处理的文件/目录")
@@ -999,7 +1094,7 @@ def parse_args() -> argparse.Namespace:
 
 def main():
     args = parse_args()
-    explicit = args.cache or args.installers or args.gpu_cache or args.logs or args.empty_dirs
+    explicit = args.cache or args.installers or args.gpu_cache or args.logs or args.empty_dirs or args.system
 
     while True:
         if not explicit:
@@ -1028,6 +1123,8 @@ def main():
             categories.append(("cat_logs", clean_logs))
         if args.empty_dirs or not explicit:
             categories.append(("cat_empty_dirs", clean_empty_dirs))
+        if args.system or not explicit:
+            categories.append(("cat_system", clean_system))
 
         mode_label = f"{YELLOW}{s('mode_dry')}{RESET}" if dry else f"{RED}{s('mode_exec')}{RESET}"
         print(f"\n{BOLD}{s('title')}{RESET}  [{mode_label}]")
