@@ -25,6 +25,10 @@ def _enable_vt():
             ctypes.windll.kernel32.SetConsoleMode(
                 ctypes.windll.kernel32.GetStdHandle(-11), 7
             )
+            # 控制台默认代码页可能不是 UTF-8（如日文系统的 932），
+            # 不切换会导致中日文文字在新开的控制台窗口里乱码
+            ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+            ctypes.windll.kernel32.SetConsoleCP(65001)
         except Exception:
             pass
         try:
@@ -51,7 +55,7 @@ BOLD    = "\033[1m"
 RESET   = "\033[0m"
 
 _RAINBOW  = [RED, YELLOW, GREEN, CYAN, MAGENTA, BLUE]
-_VERSION  = "1.03"
+_VERSION  = "1.04"
 
 
 def _rainbow_words(text: str) -> str:
@@ -1095,6 +1099,17 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
     explicit = args.cache or args.installers or args.gpu_cache or args.logs or args.empty_dirs or args.system
+
+    # 无分类参数 + 真终端环境时优先用 Textual TUI；未装 textual 或
+    # 非交互环境（重定向/管道）下自动降级回下面的按键菜单，互不影响
+    if not explicit and sys.stdin.isatty() and sys.stdout.isatty():
+        try:
+            from cleaner_tui import run_tui
+        except ImportError:
+            pass
+        else:
+            run_tui(Path(args.user) if args.user else None)
+            return
 
     while True:
         if not explicit:

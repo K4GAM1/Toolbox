@@ -3,6 +3,12 @@
 ## further task
 - Add more application cache.
 
+## v1.04
+- Fixed CJK text becoming garbled in a fresh console window on non-UTF-8 system locales (e.g. Japanese cp932) by explicitly setting the console code page to UTF-8 (`SetConsoleOutputCP`/`SetConsoleCP`)
+- Added an optional Textual-based TUI (`cleaner_tui.py`): dock with category checkboxes, live scan/execute log, results table, light/dark theme toggle (Nord-based palette), language switch. Auto-launches when `cleaner.py` is run with no arguments in an interactive terminal; falls back to the existing keypress menu if `textual` isn't installed or the session isn't interactive — `--cache`/`-x`/etc. always use the non-interactive CLI path regardless
+- Added a PowerShell port (`cleaner.ps1`) with the same six categories, welcome/post-cleanup screens and console-menu flow as `cleaner.py`, for machines without Python
+- Added a prebuilt onedir Windows package (`cleaner-1.04-win64.zip`) for convenience; PyInstaller executables can trigger antivirus false positives (ML heuristics — confirmed hit `Trojan:Win32/Bearfoos.B!ml` on Defender during testing), so `start.bat` (running from source) remains the primary recommended way to use this tool
+
 ## v1.03
 - Fixed a crash on Python 3.9 (`X | None` union syntax needs 3.10+) by adding `from __future__ import annotations`
 - Added a new system-level category (`--system`): Windows Temp, Windows Update download cache (`SoftwareDistribution\Download`), and Recycle Bin (via `SHEmptyRecycleBinW`)
