@@ -19,4 +19,7 @@ desktop.ini
 # dotfiles 备份不进仓库：这是公开仓库，更新备份时随时可能把凭据带进来
 MacOS/Zsh/
 
+# 备份文件：git 本身就是版本控制，.bak 是多余的
+*.bak
+
 CLAUDE.md
