@@ -15,6 +15,17 @@ BASICS = ("Max 用中文交流，人在日本。他的机器：eeast(Mac mini)�
           "deast(Arch，与 ceast 同一台物理机)、n1(OpenWrt 软路由)、hakuto(实验室 Windows)。"
           "Toolbox 工具仓库在 ceast 的 D 盘，按操作系统分组。")
 
+# claude -p 在非交互下拿不到权限批准，所以这里预授权。只给只读。
+# 不用 --permission-mode auto：实测它会放行破坏性操作（让它删一个探针文件，真删了）。
+# 注意 --allowedTools 是可变参数，必须写成 --allowedTools=... 的等号形式，
+# 否则它会把后面的 prompt 一起吞成工具名，报"没有提供输入"。
+# 精确前缀模式匹配不上实际命令形式（Bash(git log*) 匹配不到 git -C <path> log），
+# 所以这里不收 git；要看仓库状态让 Claude 用 Read 读，或自己跑。
+# Bash(ssh*) 是这份白名单里最大的口子——远程那头能执行任意命令。要收紧就删掉它。
+CLAUDE_ALLOW = ("Read,Grep,Glob,WebSearch,"
+                "Bash(ls*),Bash(cat*),Bash(head*),Bash(tail*),Bash(grep*),Bash(find*),"
+                "Bash(ssh*),Bash(ping*),Bash(tailscale*),Bash(defaults read*),Bash(fm *)")
+
 SCHEMA = {
     "title": "Route", "type": "object", "additionalProperties": False,
     "required": ["escalate"], "x-order": ["escalate", "topic", "reply"],
@@ -86,8 +97,8 @@ def ask_claude(q, sid, hit=None, new=False):
     """new=True 用这个 sid 开新会话，否则续接已有的。"""
     prompt = f"{q}\n\n（提示：记忆库里可能有「{hit}」这条相关）" if hit else q
     flag = ["--session-id", sid] if new else ["--resume", sid]
-    r = subprocess.run(["claude", "-p"] + flag + [prompt], cwd=PROJECT,
-                       capture_output=True, text=True)
+    r = subprocess.run(["claude", "-p", f"--allowedTools={CLAUDE_ALLOW}"] + flag + [prompt],
+                       cwd=PROJECT, capture_output=True, text=True)
     return (r.stdout or r.stderr).strip()
 
 
