@@ -1,0 +1,63 @@
+# 终端窗口尺寸复位
+#
+# Terminal.app 的默认尺寸在 设置 → 描述文件 → Silver Aerogel → 窗口 里，
+# 已设为 106x30（plist 里的 columnCount / rowCount）。新窗口按这个尺寸开，
+# 但手动拖动改过之后不会自己回去，所以这里提供一键复位。
+#
+# 原理：CSI 8 ; 行 ; 列 t —— xterm 的窗口操作转义序列，Terminal.app 支持。
+# 用它而不用 osascript，是因为不需要"自动化"权限，也不会有几百毫秒延迟。
+
+TERM_COLS=106
+TERM_ROWS=30
+
+winsize() {
+  # 不带参数则复位到默认；也可 winsize 120 40 临时指定
+  printf '\e[8;%s;%st' "${2:-$TERM_ROWS}" "${1:-$TERM_COLS}"
+}
+
+# 绑到 Ctrl+G。zsh 默认把 ^G 绑给 list-expand，基本用不到。
+# 想换键就改下面的 bindkey，例如 '^O'；^R ^A ^E ^K ^W 这些别占。
+_winsize-reset() {
+  winsize
+  zle reset-prompt
+}
+zle -N _winsize-reset
+bindkey '^G' _winsize-reset
+
+# fastfetch —— 只在 kitty 里跑
+#
+# 配置（~/.config/fastfetch/config.jsonc）的 logo 用的是 kitty 图形协议，
+# 换到 Terminal.app 会打出一大堆转义序列，所以必须判断终端。
+# $KITTY_WINDOW_ID 由 kitty 自己注入，别的终端里不存在。
+#
+# 每个新窗口和新标签页都会跑一次（约 30ms）。如果嫌 cmd+d 分屏时
+# 也跟着刷屏，把条件改成只在第一个窗格跑：
+#   [[ -n $KITTY_WINDOW_ID && $KITTY_WINDOW_ID == 1 ]]
+if [[ -n $KITTY_WINDOW_ID ]]; then
+  fastfetch
+fi
+
+# 补全系统
+#
+# compinit 每次都要校验 fpath 下所有补全文件的权限，是 shell 启动最慢的
+# 一步。这里改成超过 24 小时才完整校验一次，其余时候用 -C 跳过校验。
+# 装了新工具想立刻补全：rm ~/.zcompdump 再开新窗口。
+#
+# brew 的补全目录不用另外加，.zprofile 里的 brew shellenv 已经写进 fpath。
+autoload -Uz compinit
+if [[ -n ~/.zcompdump(#qN.mh+24) ]]; then
+  compinit
+else
+  compinit -C
+fi
+
+# API key 等敏感变量，放在 ~/.env（权限 600，不进任何仓库）
+#
+# set -a 让之后的赋值自动 export。这里用 if 块而不是 && 串联：
+# 串联时 source 一旦返回非零，末尾的 set +a 就不执行，自动 export 会
+# 一直开着，之后所有变量（含临时变量）都会被 export 给子进程。
+if [ -f "$HOME/.env" ]; then
+  set -a
+  source "$HOME/.env"
+  set +a
+fi
