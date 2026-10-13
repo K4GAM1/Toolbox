@@ -10,6 +10,7 @@
 - **Excludes the "协作偏好" group of MEMORY.md from the classifier list.** Those entries are behaviour rules for Claude, not queryable topics, and they poisoned the matching: "git 熟练度" made "git rebase 和 merge 有什么区别" escalate. Dropping that group took accuracy from 9/12 to 11/12 and the list from 68 to 56 titles (569 → 493 tokens). The one remaining miss is a follow-up with no topic keyword, which stickiness already covers
 - Tested the alternative "escalate whenever fm cannot answer" design — classify by whether the question is about Max at all, no topic list. **Measured worse: 6/10 vs 7/10, and it fails in the dangerous direction**: asked about PZ void-stuck and napcat 1006514 it judged itself capable and then fabricated. The model does not know what it does not know, so self-assessment cannot carry the routing decision
 - Dropped the Toolbox location from `BASICS`; hardcoded facts in the persona are easy to trip over and it was not needed
+- Conversation mode now removes its temporary transcript directory on exit; it used to leave one behind in $TMPDIR per run
 - Auth failures now print what to actually check instead of relaying claude's raw error. The usual cause is not an expired token but a shell started before the token was written — its environment is a snapshot from launch time
 
 ## v1.1

@@ -5,7 +5,7 @@
   fmc               进入对话模式（命中话题后粘滞在 Claude，/fm 放开）
   cat f | fmc       把 stdin 当一个问题
 """
-import datetime, io, json, os, re, subprocess, sys, tempfile, uuid
+import datetime, io, json, os, re, shutil, subprocess, sys, tempfile, uuid
 
 MEMORY = os.path.expanduser(
     "~/.claude/projects/-Users-max-Develop-Library-Claude-code/memory/MEMORY.md")
@@ -167,7 +167,14 @@ def oneshot(q):
 
 def repl():
     tl = titles()
-    t = os.path.join(tempfile.mkdtemp(prefix="fmc-"), "chat.json")
+    d = tempfile.mkdtemp(prefix="fmc-")
+    try:
+        return _loop(tl, os.path.join(d, "chat.json"))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)  # 对话是一次性的，别在 $TMPDIR 里攒目录
+
+
+def _loop(tl, t):
     new_transcript(t, chat_instructions())  # 对话上下文只带人设，不带清单
     sid, sticky = None, False
     print("fm 对话中。命中记忆话题会粘滞到 Claude，/fm 放开，/q 退出。")
