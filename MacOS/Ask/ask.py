@@ -121,7 +121,17 @@ def ask_claude(q, sid, hit=None, new=False):
     flag = ["--session-id", sid] if new else ["--resume", sid]
     r = subprocess.run(["claude", "-p", f"--allowedTools={CLAUDE_ALLOW}"] + flag + [prompt],
                        cwd=PROJECT, capture_output=True, text=True)
-    return (r.stdout or r.stderr).strip()
+    out = (r.stdout or r.stderr).strip()
+    if "Failed to authenticate" in out or "OAuth session expired" in out:
+        # 最常见的原因不是 token 过期，而是这个 shell 开得太早：环境变量是
+        # 它启动那一刻的快照，之后才写进 ~/.zshenv.local 的东西它读不到。
+        hint = "\n\n[ask] claude 认证失败。先确认这个 shell 有没有 token：\n"
+        hint += "      echo ${#CLAUDE_CODE_OAUTH_TOKEN}   # 应为 108\n"
+        hint += "  为 0 的话这个终端开得太早，跑 exec zsh 重载环境即可。\n"
+        hint += "  确实有值却仍失败，才是 token 过期：claude setup-token 重新生成，\n"
+        hint += "  写进 ~/.zshenv.local（不是 .zshrc，脚本读不到）。"
+        return out + hint
+    return out
 
 
 def hit_of(d, tl):
