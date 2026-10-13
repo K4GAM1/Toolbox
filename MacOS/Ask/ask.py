@@ -12,8 +12,7 @@ MEMORY = os.path.expanduser(
 PROJECT = "/Users/max/Develop Library/Claude_code"  # claude -p 只在此 cwd 下加载 memory
 
 BASICS = ("Max 用中文交流，人在日本。他的机器：eeast(Mac mini)、ceast(Windows)、"
-          "deast(Arch，与 ceast 同一台物理机)、n1(OpenWrt 软路由)、hakuto(实验室 Windows)。"
-          "Toolbox 工具仓库在 ceast 的 D 盘，按操作系统分组。")
+          "deast(Arch，与 ceast 同一台物理机)、n1(OpenWrt 软路由)、hakuto(实验室 Windows)。")
 
 # claude -p 在非交互下拿不到权限批准，所以这里预授权。只给只读。
 # 不用 --permission-mode auto：实测它会放行破坏性操作（让它删一个探针文件，真删了）。
@@ -48,8 +47,23 @@ def today():
     return datetime.date.today().isoformat()
 
 
+# MEMORY.md 里"协作偏好"那组是给 Claude 的行为准则，不是可查询的话题。
+# 留在清单里会让任何沾边的问题误命中——"git 熟练度"这条就让
+# "git rebase 和 merge 有什么区别"被误转（实测）。排掉后 9/12 升到 11/12。
+SKIP_GROUP = "协作偏好"
+
+
 def titles():
-    return re.findall(r"^- \[([^\]]+)\]", io.open(MEMORY, encoding="utf-8").read(), re.M)
+    """MEMORY.md 里可查询的话题标题，按 ## 分组过滤。"""
+    out, keep = [], True
+    for line in io.open(MEMORY, encoding="utf-8").read().split("\n"):
+        if line.startswith("## "):
+            keep = SKIP_GROUP not in line
+        elif keep and line.startswith("- ["):
+            m = re.match(r"- \[([^\]]+)\]", line)
+            if m:
+                out.append(m.group(1))
+    return out
 
 
 def route_instructions(tl):
