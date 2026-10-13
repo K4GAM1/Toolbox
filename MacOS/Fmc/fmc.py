@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """分流器：闲聊由本地 fm 答，涉及记忆库话题的转 claude -p。
 
-  ask '问题'        单次问答
-  ask               进入对话模式（命中话题后粘滞在 Claude，/fm 放开）
-  cat f | ask       把 stdin 当一个问题
+  fmc '问题'        单次问答
+  fmc               进入对话模式（命中话题后粘滞在 Claude，/fm 放开）
+  cat f | fmc       把 stdin 当一个问题
 """
 import datetime, io, json, os, re, subprocess, sys, tempfile, uuid
 
@@ -139,7 +139,7 @@ def ask_claude(q, sid, hit=None, new=False):
     if "Failed to authenticate" in out or "OAuth session expired" in out:
         # 最常见的原因不是 token 过期，而是这个 shell 开得太早：环境变量是
         # 它启动那一刻的快照，之后才写进 ~/.zshenv.local 的东西它读不到。
-        hint = "\n\n[ask] claude 认证失败。先确认这个 shell 有没有 token：\n"
+        hint = "\n\n[fmc] claude 认证失败。先确认这个 shell 有没有 token：\n"
         hint += "      echo ${#CLAUDE_CODE_OAUTH_TOKEN}   # 应为 108\n"
         hint += "  为 0 的话这个终端开得太早，跑 exec zsh 重载环境即可。\n"
         hint += "  确实有值却仍失败，才是 token 过期：claude setup-token 重新生成，\n"
@@ -167,7 +167,7 @@ def oneshot(q):
 
 def repl():
     tl = titles()
-    t = os.path.join(tempfile.mkdtemp(prefix="ask-"), "chat.json")
+    t = os.path.join(tempfile.mkdtemp(prefix="fmc-"), "chat.json")
     new_transcript(t, chat_instructions())  # 对话上下文只带人设，不带清单
     sid, sticky = None, False
     print("fm 对话中。命中记忆话题会粘滞到 Claude，/fm 放开，/q 退出。")

@@ -13,7 +13,7 @@
 ## v1.0
 - Initial tool: routes each question between the on-device Apple foundation model (`fm`) and Claude Code. Small talk is answered locally, offline and free; anything touching a topic in the Claude memory index is handed off to `claude -p`
 - Feeds `fm` only the 66 memory titles (~476 tokens) instead of the full index (~3088), leaving most of the 8192-token window for the conversation itself
-- Three entry points: `ask.py '<question>'` one-shot, `ask.py` conversation mode, `cat f | ask.py` treats stdin as a single question
+- Three entry points: `fmc '<question>'` one-shot, `fmc` conversation mode, `cat f | fmc` treats stdin as a single question
 - Conversation mode uses sticky handoff: once a topic is hit every following turn goes to Claude until `/fm` releases it. Follow-ups such as "那改成别名要怎么写" carry no topic keyword at all, so without stickiness the 3B model would classify them as small talk and answer from nothing
 - Keeps Claude-side continuity with a self-generated `--session-id`, then `--resume` on that same uuid. Deliberately avoids `-c`, which attaches to the most recent session and would cross into unrelated ones
 - Discards the `reply` field whenever `escalate` is true: `fm` only ever sees titles, so anything it says about their contents is fabricated
