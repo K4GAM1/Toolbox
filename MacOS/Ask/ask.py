@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-"""分流器：闲聊由本地 fm 答，涉及记忆库话题的转给 claude -p。"""
-import io, json, os, re, subprocess, sys, tempfile
+"""分流器：闲聊由本地 fm 答，涉及记忆库话题的转 claude -p。
+
+  ask.py '问题'        单次问答
+  ask.py               进入对话模式（命中话题后粘滞在 Claude，/fm 放开）
+  cat f | ask.py       把 stdin 当一个问题
+"""
+import io, json, os, re, subprocess, sys, tempfile, uuid
 
 MEMORY = os.path.expanduser(
     "~/.claude/projects/-Users-max-Develop-Library-Claude-code/memory/MEMORY.md")
@@ -21,38 +26,134 @@ SCHEMA = {
 }
 
 
-def main():
-    q = " ".join(sys.argv[1:]).strip() or sys.stdin.read().strip()
-    if not q:
-        sys.exit("用法: ask.py '你的问题'")
+def uid():
+    return str(uuid.uuid4()).upper()
 
-    titles = re.findall(r"^- \[([^\]]+)\]", io.open(MEMORY, encoding="utf-8").read(), re.M)
-    inst = (f"你是 Max 的助手兼分流器。{BASICS}\n"
-            f"他记忆库里已有的话题清单：\n{'、'.join(titles)}\n"
+
+def titles():
+    return re.findall(r"^- \[([^\]]+)\]", io.open(MEMORY, encoding="utf-8").read(), re.M)
+
+
+def instructions(tl):
+    return (f"你是 Max 的助手兼分流器。{BASICS}\n"
+            f"他记忆库里已有的话题清单：\n{'、'.join(tl)}\n"
             "规则：用户的话涉及清单里某个话题时，escalate=true 并把那个标题原样抄进 topic；"
             "无关的闲聊则 escalate=false 并用 reply 直接回答。topic 只能是清单里的原文。")
 
+
+def entry(role, text, **extra):
+    e = {"id": uid(), "role": role, "contents": [{"id": uid(), "text": text, "type": "text"}]}
+    e.update(extra)
+    return e
+
+
+def new_transcript(path, inst):
+    doc = {"modelName": "system",
+           "transcript": {"transcript": {"entries": [entry("instructions", inst)]},
+                          "version": "1.1", "type": "FoundationModels.Transcript"}}
+    io.open(path, "w", encoding="utf-8").write(json.dumps(doc, ensure_ascii=False))
+
+
+def append_turn(path, q, a):
+    """把一轮问答补进 transcript，好让 fm 知道这段聊过什么。"""
+    doc = json.loads(io.open(path, encoding="utf-8").read())
+    es = doc["transcript"]["transcript"]["entries"]
+    es.append(entry("user", q, options={}, contextOptions={}))
+    es.append(entry("response", a))
+    io.open(path, "w", encoding="utf-8").write(json.dumps(doc, ensure_ascii=False))
+
+
+def route(q, tl, transcript=None):
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(SCHEMA, f)
         schema = f.name
+    cmd = ["fm", "respond", "--no-stream", "--schema", schema]
+    if transcript:  # 对话模式：上下文走 transcript，instructions 已在里面
+        cmd += ["--resume", transcript, "--save-transcript", transcript]
+    else:
+        cmd += ["-i", instructions(tl)]
     try:
-        r = subprocess.run(["fm", "respond", "--no-stream", "--schema", schema, "-i", inst, q],
-                           capture_output=True, text=True)
-        d = json.loads(r.stdout.strip().splitlines()[-1])
+        r = subprocess.run(cmd + [q], capture_output=True, text=True)
+        return json.loads(r.stdout.strip().splitlines()[-1])
     except (json.JSONDecodeError, IndexError):
-        sys.exit(f"fm 返回异常: {r.stdout.strip()[:200]} {r.stderr.strip()[:200]}")
+        return {"escalate": False,
+                "reply": f"(fm 返回异常: {r.stdout.strip()[:120]}{r.stderr.strip()[:120]})"}
     finally:
         os.unlink(schema)
 
+
+def ask_claude(q, sid, hit=None, new=False):
+    """new=True 用这个 sid 开新会话，否则续接已有的。"""
+    prompt = f"{q}\n\n（提示：记忆库里可能有「{hit}」这条相关）" if hit else q
+    flag = ["--session-id", sid] if new else ["--resume", sid]
+    r = subprocess.run(["claude", "-p"] + flag + [prompt], cwd=PROJECT,
+                       capture_output=True, text=True)
+    return (r.stdout or r.stderr).strip()
+
+
+def oneshot(q):
+    tl = titles()
+    d = route(q, tl)
     if not d.get("escalate"):
         print(d.get("reply") or "(fm 没给出回答)")
-        return
-
-    # escalate 时模型只有标题、没有内容，它填的 reply 是编的，丢弃不用。
-    hit = d.get("topic") if d.get("topic") in titles else None
+        return 0
+    # escalate 时 fm 只有标题没有内容，它填的 reply 是编的，丢弃。
+    hit = d.get("topic") if d.get("topic") in tl else None
     print(f"[转 Claude{'：' + hit if hit else ''}]", file=sys.stderr)
-    prompt = f"{q}\n\n（提示：记忆库里可能有「{hit}」这条相关）" if hit else q
-    sys.exit(subprocess.run(["claude", "-p", prompt], cwd=PROJECT).returncode)
+    print(ask_claude(q, str(uuid.uuid4()), hit, new=True))
+    return 0
 
 
-main()
+def repl():
+    tl = titles()
+    t = os.path.join(tempfile.mkdtemp(prefix="ask-"), "chat.json")
+    new_transcript(t, instructions(tl))
+    sid, sticky = None, False
+    print("fm 对话中。命中记忆话题会粘滞到 Claude，/fm 放开，/q 退出。")
+    while True:
+        try:
+            q = input("\n[claude] > " if sticky else "\n> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not q:
+            continue
+        if q in ("/q", "/quit", "/exit"):
+            break
+        if q == "/fm":
+            sticky = False
+            print("(已放开，回到 fm)")
+            continue
+
+        if sticky:
+            a = ask_claude(q, sid)
+            print(a)
+            append_turn(t, q, a.split("\n")[0][:150])  # 只回灌一句，别吃光 8192
+            continue
+
+        d = route(q, tl, transcript=t)
+        if not d.get("escalate"):
+            print(d.get("reply") or "(fm 没给出回答)")
+            continue
+        hit = d.get("topic") if d.get("topic") in tl else None
+        print(f"[转 Claude{'：' + hit if hit else ''}]", file=sys.stderr)
+        sid = str(uuid.uuid4())
+        a = ask_claude(q, sid, hit, new=True)
+        print(a)
+        append_turn(t, q, a.split("\n")[0][:150])
+        sticky = True
+    print("bye")
+    return 0
+
+
+def main():
+    arg = " ".join(sys.argv[1:]).strip()
+    if arg:
+        return oneshot(arg)
+    if not sys.stdin.isatty():
+        q = sys.stdin.read().strip()
+        return oneshot(q) if q else 1
+    return repl()
+
+
+sys.exit(main())
