@@ -5,7 +5,7 @@
   ask.py               进入对话模式（命中话题后粘滞在 Claude，/fm 放开）
   cat f | ask.py       把 stdin 当一个问题
 """
-import io, json, os, re, subprocess, sys, tempfile, uuid
+import datetime, io, json, os, re, subprocess, sys, tempfile, uuid
 
 MEMORY = os.path.expanduser(
     "~/.claude/projects/-Users-max-Develop-Library-Claude-code/memory/MEMORY.md")
@@ -46,7 +46,9 @@ def titles():
 
 
 def instructions(tl):
-    return (f"你是 Max 的助手兼分流器。{BASICS}\n"
+    # 模型不知道当前日期，不注入的话它会按训练数据自信地编（实测答成 2024 年）。
+    today = datetime.date.today().isoformat()
+    return (f"你是 Max 的助手兼分流器。今天是 {today}。{BASICS}\n"
             f"他记忆库里已有的话题清单：\n{'、'.join(tl)}\n"
             "规则：用户的话涉及清单里某个话题时，escalate=true 并把那个标题原样抄进 topic；"
             "无关的闲聊则 escalate=false 并用 reply 直接回答。topic 只能是清单里的原文。")
