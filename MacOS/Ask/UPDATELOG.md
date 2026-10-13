@@ -4,6 +4,12 @@
 - Consider trimming the fm transcript when it approaches the 8192-token ceiling; it currently only ever grows.
 - Routing missed "ask.py 里 BASICS 这个常量写了什么" (title "ask.py 分流器" is in the list). Long questions carrying instructions seem to throw the classifier off; worth a larger test set.
 
+## v1.1
+- Split classification and small talk into two separate `fm` calls. The routing schema no longer has a `reply` field at all, so the model cannot speak while classifying, and the small-talk call no longer sees the 66-title list. Doing both in one call let the list bleed into casual answers — asked for the date it replied with the date and then "这个话题涉及容器管理，建议谨慎部署"
+- Routing is now stateless; stickiness already handles follow-ups, so the classifier does not need conversation history. The conversation transcript carries only the chat persona
+- Injects the current date into both instruction sets; without it the model answers from training data (observed: 2024-04-05)
+- Costs one extra ~1s local call per small-talk turn
+
 ## v1.0
 - Initial tool: routes each question between the on-device Apple foundation model (`fm`) and Claude Code. Small talk is answered locally, offline and free; anything touching a topic in the Claude memory index is handed off to `claude -p`
 - Feeds `fm` only the 66 memory titles (~476 tokens) instead of the full index (~3088), leaving most of the 8192-token window for the conversation itself
