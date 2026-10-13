@@ -16,5 +16,7 @@ Thumbs.db
 desktop.ini
 
 # 配置文件
+# dotfiles 备份不进仓库：这是公开仓库，更新备份时随时可能把凭据带进来
+MacOS/Zsh/
 
 CLAUDE.md

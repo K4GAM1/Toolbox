@@ -1,3 +1,0 @@
-# uv
-export PATH="/Users/max/.local/bin:$PATH"
-[ -f ~/.zshenv.local ] && . ~/.zshenv.local
