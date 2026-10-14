@@ -5,6 +5,11 @@
 - `topic` accuracy stays around 6/8 no matter how the prompt is worded. It is only ever passed to Claude as a hint, so this is tolerable, but a larger test set would tell whether it is worth keeping at all.
 - Only the machine list in `BASICS` is hardcoded and will go stale; the topic list is read from MEMORY.md at every run and needs no maintenance.
 
+## v1.3
+- **Streams Claude's answer instead of blocking on it.** `claude -p` with the default `--output-format text` does not stream at all: a 34-second answer kept the screen empty for 33.8s and then dumped everything at once. Switched to `--output-format stream-json --verbose --include-partial-messages` and printing `text_delta` events as they arrive — first characters now appear at ~1.2s. `thinking_delta` events are deliberately not shown
+- Appends a style instruction (`--append-system-prompt`) telling Claude this is a command-line conversation: three to five sentences, no headings or sections. Without it answers ran over a thousand characters, which also made them slower to generate. The napcat test case went from >1000 characters to 212
+- Measured latency, for reference: `fm` is not the bottleneck — 1.69s on the very first call (model load), 0.25s afterwards, 0.73s for a classification with the 493-token instructions, 0.42s for a small-talk answer, so about 1.15s for a full small-talk turn. `claude -p` takes ~7s for a short answer and ~34s for a long one; `--model haiku` was only ~1s faster, so the model is not the lever — the output length and the streaming are
+
 ## v1.2
 - Renamed from `ask` to `fmc` (directory, script, symlink and the tool's own usage text). `ask_claude()` keeps its name — it means "ask Claude", not the tool
 - **Excludes the "协作偏好" group of MEMORY.md from the classifier list.** Those entries are behaviour rules for Claude, not queryable topics, and they poisoned the matching: "git 熟练度" made "git rebase 和 merge 有什么区别" escalate. Dropping that group took accuracy from 9/12 to 11/12 and the list from 68 to 56 titles (569 → 493 tokens). The one remaining miss is a follow-up with no topic keyword, which stickiness already covers

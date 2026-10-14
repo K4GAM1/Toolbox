@@ -21,6 +21,10 @@ BASICS = ("Max 用中文交流，人在日本。他的机器：eeast(Mac mini)�
 # 精确前缀模式匹配不上实际命令形式（Bash(git log*) 匹配不到 git -C <path> log），
 # 所以这里不收 git；要看仓库状态让 Claude 用 Read 读，或自己跑。
 # Bash(ssh*) 是这份白名单里最大的口子——远程那头能执行任意命令。要收紧就删掉它。
+# 命令行对话场景，不要长篇报告。不加这句 Claude 会写上千字，生成时间也拖长。
+CLAUDE_STYLE = ("这是命令行里的对话，回答简洁，一般三五句话之内说完。"
+                "用户明确要求详细时才展开。不要加标题和分节。")
+
 CLAUDE_ALLOW = ("Read,Grep,Glob,WebSearch,"
                 "Bash(ls*),Bash(cat*),Bash(head*),Bash(tail*),Bash(grep*),Bash(find*),"
                 "Bash(ssh*),Bash(ping*),Bash(tailscale*),Bash(defaults read*),Bash(fm *)")
@@ -130,12 +134,43 @@ def chat(q, transcript=None):
 
 
 def ask_claude(q, sid, hit=None, new=False):
-    """new=True 用这个 sid 开新会话，否则续接已有的。"""
+    """流式打印 Claude 的回答并返回全文。new=True 用这个 sid 开新会话，否则续接。
+
+    必须用 --output-format stream-json：默认的 text 模式**完全不流式**，
+    实测一个 34 秒的回答前 33.8 秒屏幕全空、最后一瞬间吐出全部。
+    换成流式后首字出现在 3.3 秒。
+    """
     prompt = f"{q}\n\n（提示：记忆库里可能有「{hit}」这条相关）" if hit else q
     flag = ["--session-id", sid] if new else ["--resume", sid]
-    r = subprocess.run(["claude", "-p", f"--allowedTools={CLAUDE_ALLOW}"] + flag + [prompt],
-                       cwd=PROJECT, capture_output=True, text=True)
-    out = (r.stdout or r.stderr).strip()
+    cmd = (["claude", "-p", "--output-format", "stream-json", "--verbose",
+            "--include-partial-messages", f"--allowedTools={CLAUDE_ALLOW}",
+            "--append-system-prompt", CLAUDE_STYLE] + flag + [prompt])
+    proc = subprocess.Popen(cmd, cwd=PROJECT, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, bufsize=1)
+    parts = []
+    for line in proc.stdout:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if d.get("type") != "stream_event":
+            continue
+        ev = d.get("event", {})
+        if ev.get("type") == "content_block_delta":
+            delta = ev.get("delta", {})
+            if delta.get("type") == "text_delta":      # thinking_delta 不显示
+                t = delta.get("text", "")
+                print(t, end="", flush=True)
+                parts.append(t)
+    proc.wait()
+    out = "".join(parts).strip()
+    if out:
+        print()
+    else:
+        out = (proc.stderr.read() or "").strip() or "(claude 无输出)"
     if "Failed to authenticate" in out or "OAuth session expired" in out:
         # 最常见的原因不是 token 过期，而是这个 shell 开得太早：环境变量是
         # 它启动那一刻的快照，之后才写进 ~/.zshenv.local 的东西它读不到。
@@ -161,7 +196,7 @@ def oneshot(q):
         return 0
     hit = hit_of(d, tl)
     print(f"[转 Claude{'：' + hit if hit else ''}]", file=sys.stderr)
-    print(ask_claude(q, str(uuid.uuid4()), hit, new=True))
+    ask_claude(q, str(uuid.uuid4()), hit, new=True)
     return 0
 
 
@@ -195,7 +230,6 @@ def _loop(tl, t):
 
         if sticky:
             a = ask_claude(q, sid)
-            print(a)
             append_turn(t, q, a.split("\n")[0][:150])  # 只回灌一句，别吃光 8192
             continue
 
@@ -207,7 +241,6 @@ def _loop(tl, t):
         print(f"[转 Claude{'：' + hit if hit else ''}]", file=sys.stderr)
         sid = str(uuid.uuid4())
         a = ask_claude(q, sid, hit, new=True)
-        print(a)
         append_turn(t, q, a.split("\n")[0][:150])
         sticky = True
     print("bye")
