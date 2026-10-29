@@ -4,6 +4,13 @@
 - Verify the `unix` target branch end to end against a real macOS/Linux box (only the `windows-admin` branch has been tested against a live target so far).
 - Consider a `-DryRun` switch to preview what would change on the target before touching it.
 
+## v1.1
+- Added `-Serve`: configures THIS machine to accept inbound SSH (installs the OpenSSH Server capability, enables sshd with Automatic start, ensures the `OpenSSH-Server-In-TCP` firewall rule exists, authorises keys and locks the ACL). The tool now covers both ends of a trust relationship instead of only the outbound one.
+- Keys for `-Serve` come from `-AllowKey` (one or more authorized_keys lines) and/or `-AllowKeyFile`; nothing is hard-coded, so no machine identity lands in this public repo.
+- `-Serve` **appends and de-duplicates** rather than overwriting `administrators_authorized_keys`. The ad-hoc script this replaced used `Set-Content` with a hard-coded key list, which silently removes every key added since -- on a machine with `PasswordAuthentication no` that is a lockout.
+- De-duplication matches on key type + blob only, ignoring the trailing comment, and strips CR first: keys pasted from Windows carry CRLF and would otherwise look new on every run.
+- `-Serve` refuses to run unelevated instead of failing halfway through with an opaque access error.
+
 ## v1.0
 - Initial tool: bootstraps passwordless SSH from this machine to a new target device, the same way it was first done by hand.
 - Generates a local ed25519 (+ rsa, for SSHFS-Win) keypair if missing; probes the target with key auth first so re-running against an already-configured target is a safe no-op.

@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
-  Bootstraps passwordless SSH from this machine to a new target device (Windows or
-  Unix), the same way it was first done by hand.
+  Bootstraps passwordless SSH between machines, the same way it was first done by
+  hand. Outbound by default (this machine -> a target device, Windows or Unix);
+  -Serve instead configures THIS machine to accept inbound SSH.
 
 .DESCRIPTION
   - Generates a local ed25519 (+ rsa, needed for SSHFS-Win ".k" mode) keypair if
@@ -21,6 +22,11 @@
   - Adds a Host block to ~\.ssh\config so `ssh <alias>` just works afterwards.
   - Optionally (-Mount) installs WinFsp + SSHFS-Win via winget if missing, and maps
     a persistent network drive to the target over SFTP.
+  - With -Serve it does the opposite end instead: installs/enables sshd on THIS
+    machine, opens the firewall and authorises the keys you pass in. Keys are
+    APPENDED and de-duplicated, never overwritten -- clobbering
+    administrators_authorized_keys locks you out of a box whose password auth is
+    off, which is exactly what the ad-hoc script this replaced used to do.
 
 .PARAMETER TargetHost
   IP address or hostname of the target device.
@@ -45,11 +51,29 @@
   Drive letter to use with -Mount, e.g. "N:". Auto-picks the next free letter if
   omitted.
 
+.PARAMETER Serve
+  Configure THIS machine to accept inbound SSH instead of registering a target.
+  Requires an elevated session. Ignores all the Target* parameters.
+
+.PARAMETER AllowKey
+  One or more public keys to authorise with -Serve, as full authorized_keys lines.
+
+.PARAMETER AllowKeyFile
+  A file of public keys to authorise with -Serve, one per line; blank lines and
+  '#' comments are skipped. Combines with -AllowKey.
+
 .EXAMPLE
   .\Register-SSHDevice.ps1 -TargetHost 192.0.2.10 -TargetUser <user> -TargetOS windows-admin -Alias winbox -Mount
 
 .EXAMPLE
   .\Register-SSHDevice.ps1 -TargetHost 192.0.2.20 -TargetUser <user> -TargetOS unix -Alias nixbox
+
+.EXAMPLE
+  # Elevated. Let two machines in; existing entries are kept.
+  .\Register-SSHDevice.ps1 -Serve -AllowKey 'ssh-ed25519 AAAA... laptop', 'ssh-ed25519 AAAA... phone'
+
+.EXAMPLE
+  .\Register-SSHDevice.ps1 -Serve -AllowKeyFile .\allowed.pub
 #>
 
 [CmdletBinding()]
@@ -60,7 +84,10 @@ param(
     [string]$TargetOS,
     [string]$Alias,
     [switch]$Mount,
-    [string]$MountDrive
+    [string]$MountDrive,
+    [switch]$Serve,
+    [string[]]$AllowKey,
+    [string]$AllowKeyFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -114,6 +141,81 @@ function Invoke-RemotePowerShellFile {
     } finally {
         Remove-Item $localTemp -Force -ErrorAction SilentlyContinue
     }
+}
+
+# ---------- -Serve: make THIS machine accept inbound SSH ----------
+
+if ($Serve) {
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+               ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $isAdmin) { throw "-Serve must run in an elevated session" }
+
+    $keys = @()
+    if ($AllowKey)     { $keys += $AllowKey }
+    if ($AllowKeyFile) { $keys += Get-Content -LiteralPath $AllowKeyFile }
+    $keys = $keys | ForEach-Object { ($_ -replace "`r", '').Trim() } |
+            Where-Object { $_ -and -not $_.StartsWith('#') }
+    if (-not $keys) { throw "-Serve needs at least one key via -AllowKey or -AllowKeyFile" }
+
+    Write-Host ""
+    Write-Host "Serving SSH on this machine" -ForegroundColor White
+    Write-Host "  Keys to authorise : $($keys.Count)"
+
+    Write-Step "Installing OpenSSH Server"
+    $cap = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' | Where-Object State -ne 'Installed'
+    if ($cap) { Add-WindowsCapability -Online -Name $cap.Name | Out-Null; Write-Ok "Installed" }
+    else      { Write-Ok "Already installed" }
+
+    Write-Step "Enabling sshd"
+    Set-Service -Name sshd -StartupType Automatic
+    if ((Get-Service sshd).Status -ne 'Running') { Start-Service sshd }
+    Write-Ok "Running, start type Automatic"
+    # Add-WindowsCapability usually creates this, but a sshd that is up while the
+    # firewall silently drops :22 looks exactly like a key problem -- check it.
+    if (-not (Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' `
+            -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
+        Write-Ok "Firewall rule created"
+    }
+
+    Write-Step "Authorising keys"
+    # Windows sshd reads this one file for EVERY account in the local
+    # Administrators group; their per-user ~\.ssh\authorized_keys is ignored
+    # (sshd_config's "Match Group administrators").
+    $akf = "$env:ProgramData\ssh\administrators_authorized_keys"
+    $lines = @()
+    if (Test-Path -LiteralPath $akf) {
+        # keys pasted from Windows often carry a trailing CR; strip it or every
+        # re-run thinks the same key is new
+        $lines = @(Get-Content -LiteralPath $akf | ForEach-Object { ($_ -replace "`r", '').Trim() } |
+                   Where-Object { $_ })
+    }
+    # match on type+blob only -- the trailing comment is free text and varies
+    $idOf  = { param($line) (($line -split '\s+') | Select-Object -First 2) -join ' ' }
+    $known = $lines | ForEach-Object { & $idOf $_ }
+    $added = 0
+    foreach ($k in $keys) {
+        if ((& $idOf $k) -in $known) {
+            Write-Host "    already present: $(($k -split '\s+' | Select-Object -Last 1))"
+        } else {
+            $lines += $k; $known += (& $idOf $k); $added++
+            Write-Host "    adding: $(($k -split '\s+' | Select-Object -Last 1))"
+        }
+    }
+    # APPEND, never overwrite. Replacing this file is how you lock yourself out of
+    # a machine that has PasswordAuthentication off.
+    Set-Content -LiteralPath $akf -Value $lines -Encoding ascii
+    Write-Ok "$added added, $($lines.Count) authorised in total"
+
+    Write-Step "Locking ACL"
+    # Administrators + SYSTEM only. Any extra ACE -- even the target user's own
+    # account -- makes sshd reject ALL pubkey auth with no useful error.
+    icacls $akf /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F' | Out-Null
+    Write-Ok "Administrators + SYSTEM only"
+
+    Write-Step "Done"
+    Write-Ok "This machine now accepts SSH for the authorised key(s)"
+    return
 }
 
 # ---------- interactive fallback for missing params ----------
